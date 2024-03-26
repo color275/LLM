@@ -1,0 +1,6 @@
+GET /index_chatbot/_search
+{
+  "query": {
+    "match_all": {}
+  }
+}
