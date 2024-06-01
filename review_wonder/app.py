@@ -24,6 +24,8 @@ from langchain_community.llms.bedrock import Bedrock
 from opensearchpy import OpenSearch, RequestsHttpConnection
 from opensearchpy.helpers import bulk
 from langchain.callbacks.streaming_stdout import StreamingStdOutCallbackHandler
+from langchain.callbacks.base import BaseCallbackHandler
+from typing import Any
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -50,6 +52,33 @@ bedrock_model_id = "anthropic.claude-3-sonnet-20240229-v1:0"
 bedrock_embedding_model_id = "amazon.titan-embed-text-v1"
 ################################################################################
 
+class StreamHandler(BaseCallbackHandler):
+    def __init__(self, initial_text=""):
+        self.container = None
+        self.initial_text = initial_text
+        self.text = initial_text
+
+    def set_container(self, container):
+        """Method to set the external container."""
+        self.container = container
+
+    
+    def on_llm_start(self, *args: Any, **kwargs: Any):
+        self.text = self.initial_text
+        # # Weird code. But just works fine.
+        # with st.chat_message("assistant"):
+        #     self.container = st.empty()
+
+    def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
+        # Add to UI Only
+        self.text += token
+        self.container.markdown(self.text, unsafe_allow_html=True)
+        # print(token, end="")
+
+    def on_llm_end(self, *args: Any, **kwargs: Any) -> None:
+        # Add to state
+        st.session_state.messages.append(self.text)
+        
 
 def get_opensearch_cluster_client():
     opensearch_client = OpenSearch(
@@ -91,7 +120,7 @@ def create_opensearch_vector_search_client(bedrock_embeddings_client, _is_aoss=F
     return docsearch
 
 
-def create_bedrock_llm():
+def create_bedrock_llm(buf_st):
     # claude-2 이하
     # bedrock_llm = Bedrock(
     #     model_id=model_version_id,
@@ -100,6 +129,9 @@ def create_bedrock_llm():
     #     )
     # bedrock_llm = BedrockChat(model_id=model_version_id, model_kwargs={'temperature': 0}, streaming=True)
 
+    stream_handler = StreamHandler()
+    stream_handler.set_container(buf_st)
+    
     bedrock_llm = BedrockChat(
         model_id=bedrock_model_id, 
         model_kwargs={'temperature': 1,
@@ -108,7 +140,7 @@ def create_bedrock_llm():
                       "max_tokens": 4096
                       },
         streaming=True,
-        callbacks=[StreamingStdOutCallbackHandler()]
+        callbacks=[stream_handler]
         )
     return bedrock_llm
 
@@ -222,7 +254,7 @@ def extract_sentences_from_pdf(opensearch_client, pdf_file, progress_bar, progre
         return 0
 
 
-def find_answer_in_sentences(image_description, user_keyword):
+def find_answer_in_sentences(image_description, user_keyword, buf_st):
     try:
         question = f"""
         이 이미지는 "{image_description}"와 관련이 있습니다. 
@@ -245,7 +277,7 @@ def find_answer_in_sentences(image_description, user_keyword):
         print("## question : ",question)
 
         bedrock_client = get_bedrock_client()
-        bedrock_llm = create_bedrock_llm()
+        bedrock_llm = create_bedrock_llm(buf_st)
 
         bedrock_embeddings_client = create_langchain_vector_embedding_using_bedrock(
             bedrock_client)
@@ -444,6 +476,9 @@ def get_image_base64(image, quality=85):
 
 def main():
 
+    if "messages" not in st.session_state.keys():
+        st.session_state.messages = ['']
+
     # 기존 업로드 문서 삭제
     # if st.sidebar.button("기존 업로드 문서 삭제"):
     #     response = opensearch_client.delete_opensearch_index(opensearch_client, index_name)
@@ -480,6 +515,7 @@ def main():
         
         if img_file is not None :
             st.session_state['img_file'] = img_file
+            st.session_state.messages = ['']
 
         st.sidebar.markdown('---')
         st.title("RAG Embedding")
@@ -518,7 +554,6 @@ def main():
                 # image = resize_image(image)
 
                 image_description = scan_using_bedrock(image, st.session_state['user_keyword'])
-                review = find_answer_in_sentences(image_description, st.session_state['user_keyword'])
 
                 with col1:
                     st.subheader("📷 Image")
@@ -526,8 +561,11 @@ def main():
 
                 with col2:
                     st.subheader("🔍 Review")
-                    st.markdown(review, unsafe_allow_html=True)
-
+                    buf_st = st.empty()
+                    review = find_answer_in_sentences(image_description, st.session_state['user_keyword'], buf_st)
+                    # st.markdown(review, unsafe_allow_html=True)
+                    # for message in st.session_state.messages:
+                    #     st.markdown(message, unsafe_allow_html=True)
                 
                 st.markdown('---')
                 st.subheader(":thinking_face: 리뷰 생성 과정")

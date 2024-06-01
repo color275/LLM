@@ -1,5 +1,5 @@
 # export AWS_DEFAULT_REGION='us-west-2'
-# nohup streamlit run app.py --server.port 8502 &
+# nohup streamlit run app.py --server.port 8503 &
 # ssh -i /Users/chiholee/Desktop/Project/keys/key.pem -L 13306:ecommerce.cluster-cgkgybnzurln.ap-northeast-2.rds.amazonaws.com:3306 ec2-user@3.35.137.48
 
 import streamlit as st
